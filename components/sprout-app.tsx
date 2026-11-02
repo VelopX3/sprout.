@@ -9,11 +9,11 @@ import {
   ShieldCheck, Sparkles, Star, Target, TrendingUp, Trophy, Wallet, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AppData, challenges, credit, currency, debit, initialData, lessons, moveToGoal } from "@/lib/demo";
+import { AppData, challenges, credit, currency, decideRequest, debit, initialData, lessons, moveToGoal, replyToRequest, requestPurchase, simulatePurchase } from "@/lib/demo";
 import { supabase } from "@/lib/supabase";
 
-type View = "home" | "parent" | "goals" | "activity" | "allowance" | "learn" | "challenges" | "profile" | "splash" | "onboarding" | "auth";
-type ModalState = null | { kind: "goal" } | { kind: "deposit"; goalId: string } | { kind: "allowance" } | { kind: "spend" } | { kind: "reward" };
+type View = "home" | "parent" | "goals" | "activity" | "allowance" | "learn" | "challenges" | "profile" | "whatif" | "splash" | "onboarding" | "auth";
+type ModalState = null | { kind: "goal" } | { kind: "deposit"; goalId: string } | { kind: "allowance" } | { kind: "spend" } | { kind: "reward" } | { kind: "purchase" };
 type IconType = typeof House;
 type MascotPose = "happy" | "think" | "celebrate" | "encourage";
 
@@ -37,8 +37,8 @@ const isAppData = (value: unknown): value is AppData => {
   if (!value || typeof value !== "object") return false;
   const data = value as Partial<AppData>;
   const transactions = data.transactions?.every((item) => item !== null && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string" && item.title.length <= 48 && typeof item.category === "string" && Number.isSafeInteger(item.amount) && item.amount > 0 && (item.direction === "in" || item.direction === "out") && typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt)));
-  const goals = data.goals?.every((item) => item !== null && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string" && item.title.length > 0 && item.title.length <= 48 && typeof item.emoji === "string" && Number.isSafeInteger(item.target) && item.target > 0 && Number.isSafeInteger(item.saved) && item.saved >= 0 && item.saved <= item.target && ["lilac", "peach", "mint"].some((color) => color === item.color));
-  const requests = data.requests?.every((item) => item !== null && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string" && item.title.length <= 48 && typeof item.emoji === "string" && Number.isSafeInteger(item.amount) && item.amount > 0);
+  const goals = data.goals?.every((item) => item !== null && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string" && item.title.length > 0 && item.title.length <= 48 && typeof item.emoji === "string" && Number.isSafeInteger(item.target) && item.target > 0 && Number.isSafeInteger(item.saved) && item.saved >= 0 && item.saved <= item.target && (item.weeklySaving === undefined || Number.isSafeInteger(item.weeklySaving) && item.weeklySaving > 0) && ["lilac", "peach", "mint"].some((color) => color === item.color));
+  const requests = data.requests?.every((item) => item !== null && typeof item === "object" && typeof item.id === "string" && typeof item.title === "string" && item.title.length > 0 && item.title.length <= 48 && typeof item.emoji === "string" && Number.isSafeInteger(item.amount) && item.amount > 0 && (item.status === undefined || ["pending", "approved", "rejected", "more_info"].includes(item.status)) && (item.category === undefined || typeof item.category === "string" && item.category.length <= 24) && (item.reason === undefined || typeof item.reason === "string" && item.reason.length <= 180) && (item.feedback === undefined || typeof item.feedback === "string" && item.feedback.length <= 180) && (item.createdAt === undefined || typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt))));
   return typeof data.childName === "string" && data.childName.length > 0 && data.childName.length <= 24 && typeof data.parentName === "string" && data.parentName.length > 0 && data.parentName.length <= 24 &&
     Number.isSafeInteger(data.balance) && (data.balance ?? -1) >= 0 && Number.isSafeInteger(data.allowance) && (data.allowance ?? -1) >= 0 &&
     typeof data.allowanceDay === "string" && Number.isSafeInteger(data.xp) && (data.xp ?? -1) >= 0 && Number.isSafeInteger(data.streak) && (data.streak ?? -1) >= 0 &&
@@ -49,17 +49,18 @@ const isAppData = (value: unknown): value is AppData => {
 
 const demoStorageKey = "sprout-data-v1:demo";
 const accountStorageKey = (id: string) => `sprout-data-v1:${id}`;
+const migrateData = (data: AppData): AppData => ({ ...initialData, ...data, goals: data.goals.map((goal) => ({ ...goal, weeklySaving: goal.weeklySaving ?? 100 })), requests: data.requests.map((item) => ({ ...item, category: item.category ?? "Other", reason: item.reason ?? "Let’s talk about it together.", status: item.status ?? "pending", feedback: item.feedback ?? "", createdAt: item.createdAt ?? new Date().toISOString() })) });
 const readAppData = (key: string): AppData | null => {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
-    return isAppData(value) ? { ...initialData, ...value } : null;
+    return isAppData(value) ? migrateData(value) : null;
   } catch { return null; }
 };
 
 const titleFor: Record<View, string> = {
   home: "Money garden", parent: "Family overview", goals: "Dreams in progress",
   activity: "Money log", allowance: "Pocket money plan", learn: "Money school",
-  challenges: "Your next little win", profile: "Your corner", splash: "A little hello",
+  challenges: "Your next little win", profile: "Your corner", whatif: "Think it through", splash: "A little hello",
   onboarding: "Welcome to Sprout", auth: "Your Sprout account",
 };
 
@@ -88,7 +89,13 @@ export default function SproutApp() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [formTitle, setFormTitle] = useState("");
   const [formAmount, setFormAmount] = useState("");
+  const [formWeeklySaving, setFormWeeklySaving] = useState("100");
   const [formEmoji, setFormEmoji] = useState("🪴");
+  const [formCategory, setFormCategory] = useState("Treats");
+  const [formReason, setFormReason] = useState("");
+  const [simulatorAmount, setSimulatorAmount] = useState("350");
+  const [simulatorGoalId, setSimulatorGoalId] = useState("g1");
+  const [parentFeedback, setParentFeedback] = useState<Record<string, string>>({});
   const [formDay, setFormDay] = useState("Monday");
   const [formError, setFormError] = useState("");
   const [authError, setAuthError] = useState("");
@@ -122,7 +129,7 @@ export default function SproutApp() {
           const localAccountData = readAppData(accountStorageKey(sessionUser.id));
           const { data: row } = await supabase.from("family_data").select("data").eq("user_id", sessionUser.id).maybeSingle();
           if (!cancelled) {
-            const remote = row && isAppData(row.data) ? { ...initialData, ...row.data } : localAccountData ?? initialData;
+            const remote = row && isAppData(row.data) ? migrateData(row.data) : localAccountData ?? initialData;
             setData(remote);
             localStorage.setItem(accountStorageKey(sessionUser.id), JSON.stringify(remote));
           }
@@ -179,7 +186,10 @@ export default function SproutApp() {
     setModal(next);
     setFormTitle("");
     setFormAmount("");
+    setFormWeeklySaving("100");
     setFormEmoji("🪴");
+    setFormCategory("Treats");
+    setFormReason("");
     setFormDay(data.allowanceDay);
     setFormError("");
   };
@@ -193,8 +203,10 @@ export default function SproutApp() {
     if (modal?.kind === "goal") {
       const name = formTitle.trim();
       if (!name || name.length > 48) { setFormError("Give your goal a short name (up to 48 characters)."); return; }
+      const weeklySaving = Number(formWeeklySaving);
       if (!Number.isSafeInteger(amount) || amount < 50 || amount > 1000000) { setFormError("Choose a whole-number goal between ₹50 and ₹10,00,000."); return; }
-      commit({ ...data, goals: [...data.goals, { id: crypto.randomUUID(), title: name, emoji: formEmoji, target: amount, saved: 0, color: ["lilac", "peach", "mint"][data.goals.length % 3] }] });
+      if (!Number.isSafeInteger(weeklySaving) || weeklySaving < 1 || weeklySaving > 100000) { setFormError("Choose a weekly saving amount from ₹1 to ₹1,00,000."); return; }
+      commit({ ...data, goals: [...data.goals, { id: crypto.randomUUID(), title: name, emoji: formEmoji, target: amount, saved: 0, weeklySaving, color: ["lilac", "peach", "mint"][data.goals.length % 3] }] });
       setModal(null); showToast("A new dream is growing 🌱");
     } else if (modal?.kind === "deposit") {
       try {
@@ -211,9 +223,14 @@ export default function SproutApp() {
       const name = formTitle.trim();
       if (!name || name.length > 48) { setFormError("Add a short note for this practice purchase."); return; }
       try {
-        commit(debit(data, amount, name, "Practice purchase"));
+        commit(debit(data, amount, name, formCategory));
         setModal(null); showToast("Demo purchase added to your money log.");
       } catch (error) { setFormError(error instanceof Error ? error.message : "That purchase could not be recorded."); }
+    } else if (modal?.kind === "purchase") {
+      try {
+        commit(requestPurchase(data, formTitle, amount, formCategory, formReason));
+        setModal(null); showToast("Request saved here for a grown-up to review.");
+      } catch (error) { setFormError(error instanceof Error ? error.message : "That request could not be saved."); }
     } else if (modal?.kind === "reward") {
       const name = formTitle.trim();
       if (!name || name.length > 48) { setFormError("Add a short note about what you’re celebrating."); return; }
@@ -232,14 +249,16 @@ export default function SproutApp() {
     } catch (error) { showToast(error instanceof Error ? error.message : "Allowance could not be added."); }
   };
 
-  const resolveRequest = (requestId: string, approved: boolean) => {
-    const request = data.requests.find((item) => item.id === requestId);
-    if (!request) return;
+  const resolveRequest = (requestId: string, status: "approved" | "rejected" | "more_info") => {
     try {
-      const next = approved ? debit(data, request.amount, request.title, "Parent approved") : data;
-      commit({ ...next, requests: data.requests.filter((item) => item.id !== requestId) });
-      showToast(approved ? `Approved ${currency(request.amount)} for ${request.title}.` : "Request declined.");
+      commit(decideRequest(data, requestId, status, parentFeedback[requestId] ?? ""));
+      showToast(status === "approved" ? "Request approved. The practice purchase is in the money log." : status === "rejected" ? "Decision saved. The child can see your note." : "A question is ready for the child.");
     } catch (error) { showToast(error instanceof Error ? error.message : "That request could not be approved."); }
+  };
+
+  const replyRequest = (requestId: string, reason: string) => {
+    try { commit(replyToRequest(data, requestId, reason)); showToast("Your reply is ready for your grown-up."); }
+    catch (error) { showToast(error instanceof Error ? error.message : "That reply could not be saved."); }
   };
 
   const completeChallenge = (id: string, reward: number) => {
@@ -316,6 +335,11 @@ export default function SproutApp() {
   const level = Math.floor(data.xp / 150) + 1;
   const levelProgress = data.xp % 150;
   const weekSpend = data.transactions.filter((item) => item.direction === "out" && item.category !== "Savings transfer" && new Date(item.createdAt).getTime() >= weekStart).reduce((sum, item) => sum + item.amount, 0);
+  const spendingCategories = Object.entries(data.transactions.filter((item) => item.direction === "out" && item.category !== "Savings transfer").reduce<Record<string, number>>((totals, item) => ({ ...totals, [item.category]: (totals[item.category] ?? 0) + item.amount }), {})).sort((a, b) => b[1] - a[1]);
+  const recordedSpend = spendingCategories.reduce((sum, [, amount]) => sum + amount, 0);
+  const simulatorCost = Number.isSafeInteger(Number(simulatorAmount)) && Number(simulatorAmount) >= 0 ? Number(simulatorAmount) : 0;
+  const simulatorGoal = data.goals.find((goal) => goal.id === simulatorGoalId);
+  const simulation = simulatePurchase(data.balance, simulatorGoal, simulatorCost);
   const recent = [...data.transactions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
   const spendingDays = useMemo(() => {
     const amounts = [0, 0, 0, 0, 0, 0, 0];
@@ -396,7 +420,7 @@ export default function SproutApp() {
         {!screen && <header className="topbar">
           <div className="topbar-title"><span className="eyebrow">{role === "parent" ? "GROWN-UP CORNER" : "YOUR MONEY SPACE"}</span><h1>{titleFor[view]}</h1></div>
           <div className="topbar-actions">
-            <span className="mode-pill"><span />Demo mode</span>
+            <span className="mode-pill"><span />Practice mode · no real money</span>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => showToast("All caught up. You’re doing great!")}><Bell size={19} /><i /></button>
             <button className="top-avatar" onClick={() => setView("profile")} aria-label="Open profile"><Mascot pose={outfitPoses[data.avatar] ?? "happy"} label={`${data.childName}'s Pip outfit`} /></button>
           </div>
@@ -411,7 +435,8 @@ export default function SproutApp() {
                 <p>You have <b>{currency(totalMoney)}</b> in your money garden.</p>
                 <div className="hero-actions">
                   <button className="button button-lime" onClick={() => setView("goals")}>See my goals <ArrowRight size={16} /></button>
-                  <button className="hero-link" onClick={() => openModal({ kind: "spend" })}>Practice a purchase</button>
+                  <button className="hero-link" onClick={() => openModal({ kind: "purchase" })}>Can I buy this?</button>
+                  <button className="hero-link" onClick={() => setView("whatif")}>What if I spend?</button>
                 </div>
               </div>
               <div className="hero-art" aria-label="Pip the turtle, your Sprout money companion">
@@ -428,6 +453,12 @@ export default function SproutApp() {
               <article className="stat-card stat-saved"><div className="stat-icon icon-lilac"><Coins size={18} /></div><div className="stat-meta"><span>Savings goals</span><strong>{currency(savedTotal)}</strong><small>{data.goals.length} little dreams in progress</small></div><button aria-label="Open savings goals" onClick={() => setView("goals")}><ArrowUpRight size={17} /></button></article>
               <article className="stat-card stat-streak"><div className="stat-icon icon-peach"><Sparkles size={18} /></div><div className="stat-meta"><span>Streak</span><strong>{data.streak} days <span className="streak-flower">✿</span></strong><small>{data.xp} XP · level {level}</small></div><button aria-label="View challenges" onClick={() => setView("challenges")}><ArrowUpRight size={17} /></button></article>
             </section>
+
+            <section className="panel where-money-panel"><div className="section-heading"><div><span className="eyebrow">YOUR MONEY STORY</span><h3>Where did my money go?</h3></div><button className="text-button" onClick={() => setView("activity")}>Money log <ArrowRight size={15} /></button></div>
+              {spendingCategories.length ? <><p className="money-story-copy">You’ve spent <strong>{currency(recordedSpend)}</strong> in this practice garden. Your pocket still has <strong>{currency(data.balance)}</strong>.</p><div className="category-list">{spendingCategories.map(([name, amount]) => <div className="category-row" key={name}><span>{name}</span><div className="category-track"><i style={{ width: `${Math.max(4, amount / recordedSpend * 100)}%` }} /></div><strong>{currency(amount)} <small>{Math.round(amount / recordedSpend * 100)}%</small></strong></div>)}</div></> : <div className="empty-inline">Your spending will grow this picture. Try a practice purchase to get started.</div>}
+            </section>
+
+            {data.requests.length > 0 && <section className="panel child-requests-panel"><div className="section-heading"><div><span className="eyebrow">LET’S DECIDE TOGETHER</span><h3>Can I buy this?</h3></div><button className="button button-soft" disabled={data.requests.some((request) => request.status === "pending" || request.status === "more_info")} onClick={() => openModal({ kind: "purchase" })}><Plus size={15} /> Ask my grown-up</button></div><PurchaseRequestList requests={data.requests} onReply={replyRequest} /></section>}
 
             <div className="dashboard-grid">
               <section className="panel goals-panel">
@@ -461,7 +492,9 @@ export default function SproutApp() {
             <section className="achievement-strip"><span className="achievement-icon">🏵️</span><div><span className="eyebrow">A BADGE TO BE PROUD OF</span><strong>Kind saver</strong><small>You’ve already tucked {currency(data.goals.find((item) => item.id === "g3")?.saved ?? 0)} away to help animals.</small></div><button onClick={() => setView("challenges")} aria-label="View your badges"><ChevronRight size={19} /></button></section>
           </>}
 
-          {view === "parent" && <ParentDashboard data={data} onGive={giveAllowance} onReward={() => openModal({ kind: "reward" })} onEditAllowance={() => openModal({ kind: "allowance" })} onResolve={resolveRequest} onGoals={() => setView("goals")} onActivity={() => setView("activity")} onAllowance={() => setView("allowance")} />}
+          {view === "parent" && <ParentDashboard data={data} feedback={parentFeedback} onFeedback={(id, value) => setParentFeedback((all) => ({ ...all, [id]: value }))} onGive={giveAllowance} onReward={() => openModal({ kind: "reward" })} onEditAllowance={() => openModal({ kind: "allowance" })} onResolve={resolveRequest} onGoals={() => setView("goals")} onActivity={() => setView("activity")} onAllowance={() => setView("allowance")} />}
+
+          {view === "whatif" && <section className="what-if-page"><div className="page-intro"><div><span className="eyebrow">PIP’S MONEY THINKER</span><h2>Pause. Play it out.</h2><p>Try a choice before you make it. Nothing here moves money.</p></div><Mascot pose="think" label="Pip helps you think through a money choice" className="what-if-mascot" /></div><div className="what-if-grid"><section className="panel what-if-controls"><label>What does it cost?<span className="amount-input-wrap"><span>₹</span><input aria-label="What does it cost?" type="number" min="0" max="100000" step="1" value={simulatorAmount} onChange={(event) => setSimulatorAmount(event.target.value)} /></span></label><label>Which dream are you saving for?<select value={data.goals.some((goal) => goal.id === simulatorGoalId) ? simulatorGoalId : data.goals[0]?.id ?? ""} onChange={(event) => setSimulatorGoalId(event.target.value)}>{data.goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.emoji} {goal.title}</option>)}</select></label><div className="what-if-choices"><button onClick={() => setSimulatorAmount("0")}>Save it all</button><button onClick={() => setSimulatorAmount("100")}>Try ₹100 instead</button></div></section><section className="what-if-result"><span className="eyebrow">IF YOU BUY IT</span><span className="what-if-balance">{currency(simulation.remainingBalance)}</span><span>left in your pocket</span><div className="what-if-note">{!Number.isSafeInteger(Number(simulatorAmount)) ? "Enter a whole number to compare choices." : simulation.shortfall ? `You need ${currency(simulation.shortfall)} more than your pocket balance.` : `${currency(simulatorCost)} less would be ready to add to ${simulatorGoal?.title ?? "a savings goal"}.`}</div><div className="what-if-goal">Current goal gap <b>{currency(simulation.goalGap)}</b><span>If you spent the money you have <b>{currency(simulation.goalGapAfter)}</b></span></div><button className="button button-dark" onClick={() => openModal({ kind: "purchase" })}>Ask my grown-up <ArrowRight size={16} /></button><small>Practice mode · no real money</small></section></div></section>}
 
           {view === "goals" && <>
             <section className="page-intro"><div><span className="eyebrow">PATIENCE LOOKS GOOD ON YOU</span><h2>Big dreams, tiny steps.</h2><p>Every little bit you save brings a wish closer.</p></div><button className="button button-dark" onClick={() => openModal({ kind: "goal" })}><Plus size={17} /> New savings goal</button></section>
@@ -499,14 +532,16 @@ export default function SproutApp() {
 
           {view === "profile" && <>
             <section className="profile-hero"><div className="profile-big-avatar"><Mascot pose={outfitPoses[data.avatar] ?? "happy"} label={`${data.childName}'s chosen Pip outfit`} /></div><div><span className="eyebrow">YOUR SPROUT PROFILE</span><h2>Hello, {data.childName}!</h2><p>Level {level} little grower · {data.streak} day streak</p></div><button className="button button-soft" onClick={() => { setView("splash"); }}>Replay the intro <Sparkles size={15} /></button></section>
-            <div className="profile-layout"><form className="panel profile-form" onSubmit={handleProfileSave}><div className="section-heading"><div><span className="eyebrow">YOUR FAMILY</span><h3>Little details</h3></div><Mascot pose={outfitPoses[data.avatar] ?? "happy"} label="Your current Pip outfit" className="profile-form-mascot" /></div><label>Child’s name<input name="childName" defaultValue={data.childName} maxLength={24} required /></label><label>Grown-up’s name<input name="parentName" defaultValue={data.parentName} maxLength={24} required /></label><label>Choose Pip’s outfit<span className="avatar-picker">{outfits.map((outfit) => <button type="button" className={data.avatar === outfit.id ? "avatar-choice selected" : "avatar-choice"} key={outfit.id} onClick={() => commit({ ...data, avatar: outfit.id })} aria-label={`Choose ${outfit.name}`} title={outfit.name}><Mascot pose={outfit.pose} label="" /></button>)}</span></label><button className="button button-dark" type="submit">Save my details <Check size={15} /></button></form>
+            <div className="profile-layout"><form className="panel profile-form" onSubmit={handleProfileSave}><div className="section-heading"><div><span className="eyebrow">YOUR FAMILY</span><h3>Little details</h3></div><Mascot pose={outfitPoses[data.avatar] ?? "happy"} label="Your current Pip outfit" className="profile-form-mascot" /></div><p className="fine-print">Use pretend nicknames only. Sprout does not need real names or contact details.</p><label>Child’s nickname<input name="childName" defaultValue={data.childName} maxLength={24} required /></label><label>Grown-up’s nickname<input name="parentName" defaultValue={data.parentName} maxLength={24} required /></label><label>Choose Pip’s outfit<span className="avatar-picker">{outfits.map((outfit) => <button type="button" className={data.avatar === outfit.id ? "avatar-choice selected" : "avatar-choice"} key={outfit.id} onClick={() => commit({ ...data, avatar: outfit.id })} aria-label={`Choose ${outfit.name}`} title={outfit.name}><Mascot pose={outfit.pose} label="" /></button>)}</span></label><button className="button button-dark" type="submit">Save my details <Check size={15} /></button></form>
               <div className="profile-side"><section className="panel settings-panel"><div className="section-heading"><div><span className="eyebrow">GROWN-UP TOOLS</span><h3>Family spaces</h3></div><ShieldCheck size={19} /></div><button className="settings-row" onClick={() => changeRole("parent")}><span className="settings-row-icon"><CircleUserRound size={18} /></span><span><b>Parent dashboard</b><small>Allowance, requests and progress</small></span><ChevronRight size={18} /></button><button className="settings-row" onClick={() => { changeRole("parent"); setView("allowance"); }}><span className="settings-row-icon"><CalendarDays size={18} /></span><span><b>Pocket money plan</b><small>Set the weekly amount and day</small></span><ChevronRight size={18} /></button><button className="settings-row" onClick={() => setView("challenges")}><span className="settings-row-icon"><Trophy size={18} /></span><span><b>Challenges &amp; rewards</b><small>Your stars and badges</small></span><ChevronRight size={18} /></button></section>
                 <section className="panel preferences-panel"><div className="section-heading"><div><span className="eyebrow">YOUR SETTINGS</span><h3>Preferences</h3></div><Settings size={18} /></div><button className="settings-row" onClick={() => { const next = !data.notifications; commit({ ...data, notifications: next }); showToast(next ? "Little reminders are on." : "Little reminders are off."); }}><span className="settings-row-icon"><Bell size={18} /></span><span><b>Friendly reminders</b><small>{data.notifications ? "On · a gentle nudge now and then" : "Off · enjoy the quiet"}</small></span><span className={`toggle-pill${data.notifications ? " toggle-on" : ""}`}><i /></span></button><button className="settings-row" onClick={() => { setOnboardingStep(0); setView("onboarding"); }}><span className="settings-row-icon"><CircleHelp size={18} /></span><span><b>How Sprout works</b><small>Take the quick tour again</small></span><ChevronRight size={18} /></button></section></div></div>
-            <section className="account-card"><div className="account-icon"><LockKeyhole size={19} /></div><div><strong>{accountEmail || "Your demo account"}</strong><small>{userId ? "Connected to your Supabase family space" : "Demo garden · saved in this browser"}</small></div>{accountEmail ? <button onClick={signOut}><LogOut size={15} /> Sign out</button> : <button onClick={() => openAuth("signup")}>Create account <ArrowRight size={15} /></button>}</section>
+            <section className="privacy-note"><ShieldCheck size={19} /><div><strong>Practice money only.</strong><p>No bank, UPI, card, real payments, ads or family messages. Purchase requests stay on this device. Use nicknames and made-up amounts.</p></div></section>
+            {!userId && <button className="reset-demo-button" onClick={() => { if (window.confirm("Reset this browser’s Sprout practice garden to its sample data?")) { localStorage.removeItem(demoStorageKey); localStorage.removeItem("sprout-data-v1"); setData(initialData); showToast("The practice garden is back at its starting point."); } }}>Reset practice garden</button>}
+            <section className="account-card"><div className="account-icon"><LockKeyhole size={19} /></div><div><strong>{accountEmail || "Your demo account"}</strong><small>{userId ? "Connected to your Supabase family space" : "Demo garden · saved in this browser"}</small></div>{accountEmail ? <button onClick={signOut}><LogOut size={15} /> Sign out</button> : supabase ? <button onClick={() => openAuth("signup")}>Create account <ArrowRight size={15} /></button> : <small>No sign-in needed for practice mode.</small>}</section>
           </>}
 
           {view === "splash" && <SplashScreen onStart={() => { setOnboardingStep(0); setView("onboarding"); }} onExplore={() => setView("home")} />}
-          {view === "onboarding" && <OnboardingScreen step={onboardingStep} onStep={setOnboardingStep} onNext={() => onboardingStep === 2 ? openAuth("signup") : setOnboardingStep(onboardingStep + 1)} onBack={() => setOnboardingStep(Math.max(0, onboardingStep - 1))} onLogin={() => openAuth("login")} onExplore={() => setView("home")} />}
+          {view === "onboarding" && <OnboardingScreen step={onboardingStep} onStep={setOnboardingStep} onNext={() => onboardingStep === 2 ? setView("home") : setOnboardingStep(onboardingStep + 1)} onBack={() => setOnboardingStep(Math.max(0, onboardingStep - 1))} onLogin={() => openAuth("login")} onExplore={() => setView("home")} showLogin={!!supabase} />}
           {view === "auth" && <AuthScreen mode={authMode} setMode={setAuthMode} onSubmit={submitAuth} error={authError} onBack={() => setView("onboarding")} demoMode={!supabase} />}
         </div>
       </main>
@@ -515,7 +550,7 @@ export default function SproutApp() {
         {[{ id: "home" as View, label: "Home", icon: House }, { id: "goals" as View, label: "Goals", icon: Target }, { id: "activity" as View, label: "Wallet", icon: Wallet }, { id: "challenges" as View, label: "Challenges", icon: Trophy }, { id: "profile" as View, label: "Profile", icon: CircleUserRound }].map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "mobile-nav-active" : ""} onClick={() => setView(id)} aria-current={view === id ? "page" : undefined}><Icon size={19} /><span>{label}</span></button>)}
       </nav>}
 
-      {modal && <ActionModal modal={modal} data={data} title={formTitle} amount={formAmount} emoji={formEmoji} day={formDay} setTitle={setFormTitle} setAmount={setFormAmount} setEmoji={setFormEmoji} setDay={setFormDay} error={formError} onSubmit={handleModalSubmit} onClose={() => { setModal(null); setFormError(""); }} />}
+      {modal && <ActionModal modal={modal} data={data} title={formTitle} amount={formAmount} weeklySaving={formWeeklySaving} emoji={formEmoji} day={formDay} category={formCategory} reason={formReason} setTitle={setFormTitle} setAmount={setFormAmount} setWeeklySaving={setFormWeeklySaving} setEmoji={setFormEmoji} setDay={setFormDay} setCategory={setFormCategory} setReason={setFormReason} error={formError} onSubmit={handleModalSubmit} onClose={() => { setModal(null); setFormError(""); }} />}
       {activeLesson && <LessonModal lessonId={activeLesson} completed={lessonWasCompleted} choice={quizChoice} onAnswer={finishLesson} onClose={() => { setActiveLesson(null); setQuizChoice(null); }} />}
       <AnimatePresence>{toast && <motion.div className="toast-message" role="status" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}><Sparkles size={16} />{toast}</motion.div>}</AnimatePresence>
       {!ready && <div className="load-indicator" aria-hidden="true" />}
@@ -530,7 +565,7 @@ function GoalCard({ goal, compact = false, onAdd }: { goal: AppData["goals"][num
   return <article className={`goal-card goal-${goal.color}${compact ? " goal-card-compact" : ""}${progress >= 100 ? " goal-card-complete" : ""}`}>
     <div className="goal-card-head"><span className="goal-emoji"><GoalIcon size={27} strokeWidth={2.8} aria-hidden="true" /></span><span className="goal-percent">{progress}%</span></div>
     <h3>{goal.title}</h3><div className="goal-progress-track"><span style={{ width: `${progress}%` }} /></div>
-    <div className="goal-card-values"><strong>{currency(goal.saved)} <small>saved</small></strong><span>of {currency(goal.target)}</span></div>
+    <div className="goal-card-values"><strong>{currency(goal.saved)} <small>saved</small></strong><span>of {currency(goal.target)}</span></div><small className="goal-time-estimate">{progress >= 100 ? "Goal reached!" : `About ${Math.ceil((goal.target - goal.saved) / goal.weeklySaving)} weeks at ${currency(goal.weeklySaving)}/week`}</small>
     <div className="goal-card-footer">{progress >= 100 ? <span className="goal-complete-label"><CheckCircle2 size={14} /> You did it!</span> : <span>{currency(goal.target - goal.saved)} to go</span>}<button disabled={progress >= 100} onClick={onAdd} aria-label={`Add money to ${goal.title}`}><Plus size={15} /> Add</button></div>
   </article>;
 }
@@ -540,8 +575,14 @@ function TransactionList({ transactions }: { transactions: AppData["transactions
   return <div className="transaction-list">{transactions.map((item) => <div className="transaction-row" key={item.id}><span className={`transaction-icon${item.direction === "in" ? " transaction-in" : " transaction-out"}`}>{item.direction === "in" ? <ArrowDownLeft size={17} /> : item.category === "Savings transfer" ? <Target size={16} /> : <CreditCard size={16} />}</span><span className="transaction-main"><strong>{item.title}</strong><small>{item.category} · {moneyDate(item.createdAt)}</small></span><strong className={item.direction === "in" ? "transaction-amount amount-in" : "transaction-amount"}>{item.direction === "in" ? "+" : "−"}{currency(item.amount)}</strong></div>)}</div>;
 }
 
-function ParentDashboard({ data, onGive, onReward, onEditAllowance, onResolve, onGoals, onActivity, onAllowance }: {
-  data: AppData; onGive: () => void; onReward: () => void; onEditAllowance: () => void; onResolve: (id: string, approved: boolean) => void; onGoals: () => void; onActivity: () => void; onAllowance: () => void;
+function PurchaseRequestList({ requests, onReply }: { requests: AppData["requests"]; onReply: (id: string, reason: string) => void }) {
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  if (!requests.length) return <div className="empty-inline"><ShieldCheck size={17} /> No requests yet. When you ask, your grown-up can review it here on this device.</div>;
+  return <div className="purchase-request-list">{requests.map((request) => <article className="purchase-request" key={request.id}><span className="request-emoji">{request.emoji}</span><div className="purchase-request-main"><div className="purchase-request-title"><strong>{request.title}</strong><span className={`request-status status-${request.status}`}>{request.status === "more_info" ? "More info needed" : request.status[0].toUpperCase() + request.status.slice(1)}</span></div><small>{request.category} · {currency(request.amount)}</small><p>{request.reason}</p>{request.feedback && <p className="request-feedback"><b>Grown-up says:</b> {request.feedback}</p>}{request.status === "more_info" && <div className="request-reply"><label>Tell your grown-up a little more<input value={replies[request.id] ?? ""} onChange={(event) => setReplies((all) => ({ ...all, [request.id]: event.target.value }))} maxLength={180} /></label><button className="button button-dark" onClick={() => onReply(request.id, replies[request.id] ?? "")}>Send reply</button></div>}</div></article>)}</div>;
+}
+
+function ParentDashboard({ data, feedback, onFeedback, onGive, onReward, onEditAllowance, onResolve, onGoals, onActivity, onAllowance }: {
+  data: AppData; feedback: Record<string, string>; onFeedback: (id: string, value: string) => void; onGive: () => void; onReward: () => void; onEditAllowance: () => void; onResolve: (id: string, status: "approved" | "rejected" | "more_info") => void; onGoals: () => void; onActivity: () => void; onAllowance: () => void;
 }) {
   const totalSaved = data.goals.reduce((sum, goal) => sum + goal.saved, 0);
   const spend = data.transactions.filter((item) => item.direction === "out" && item.category !== "Savings transfer").reduce((sum, item) => sum + item.amount, 0);
@@ -552,7 +593,7 @@ function ParentDashboard({ data, onGive, onReward, onEditAllowance, onResolve, o
     <section className="parent-stats"><article><span className="parent-stat-icon parent-icon-green"><Wallet size={18} /></span><span>In their pocket</span><strong>{currency(data.balance)}</strong><small>Available pocket money</small></article><article><span className="parent-stat-icon parent-icon-lilac"><Target size={18} /></span><span>Growing in goals</span><strong>{currency(totalSaved)}</strong><small>{data.goals.length} goals in progress</small></article><article><span className="parent-stat-icon parent-icon-peach"><TrendingUp size={18} /></span><span>Recorded spending</span><strong>{currency(spend)}</strong><small>Since this demo began</small></article></section>
     <div className="parent-grid"><section className="panel allowance-control-panel"><div className="section-heading"><div><span className="eyebrow">A ROUTINE THEY CAN COUNT ON</span><h3>Weekly pocket money</h3></div><button className="icon-button quiet-button" aria-label="Edit allowance" onClick={onEditAllowance}><Settings size={17} /></button></div><div className="allowance-amount-row"><div><strong>{currency(data.allowance)}</strong><span>every {data.allowanceDay.toLowerCase()}</span></div><div className="allowance-calendar"><CalendarDays size={23} /><span>Next up</span><b>{data.allowanceDay}</b></div></div><div className="parent-allowance-actions"><button className="button button-dark" onClick={onGive}><Gift size={16} /> Give this week’s allowance</button><button className="button button-soft" onClick={onEditAllowance}>Edit schedule</button><button className="button button-soft" onClick={onReward}><Sparkles size={15} /> Give a reward</button></div><p className="fine-print">Demo only. Allowance and rewards update the practice balance and money log.</p></section>
       <section className="panel parent-spending-panel"><div className="section-heading"><div><span className="eyebrow">A CHANCE TO TALK, NOT TO JUDGE</span><h3>Spending snapshot</h3></div><button className="text-button" onClick={onActivity}>Money log <ArrowRight size={15} /></button></div>{categoryList.length ? <><div className="parent-spend-total">{currency(spend)} <span>recorded spending</span></div><div className="category-list">{categoryList.map(([name, amount]) => <div className="category-row" key={name}><span>{name}</span><div className="category-track"><i style={{ width: `${Math.max(5, amount / Math.max(spend, 1) * 100)}%` }} /></div><strong>{currency(amount)}</strong></div>)}</div></> : <div className="empty-state"><span>🧾</span><strong>No spending yet.</strong><p>Practice purchases will give you something to talk through together.</p></div>}</section></div>
-    <div className="parent-grid parent-grid-lower"><section className="panel approval-panel"><div className="section-heading"><div><span className="eyebrow">KIND BOUNDARIES</span><h3>Needs your okay</h3></div><span className="request-count">{data.requests.length}</span></div>{data.requests.length ? <div className="request-list">{data.requests.map((request) => <div className="request-row" key={request.id}><span className="request-emoji">{request.emoji}</span><div><strong>{request.title}</strong><small>Requested by {data.childName} · {currency(request.amount)}</small></div><div className="request-actions"><button onClick={() => onResolve(request.id, true)} aria-label={`Approve ${request.title}`} title="Approve"><Check size={16} /></button><button onClick={() => onResolve(request.id, false)} aria-label={`Decline ${request.title}`} title="Decline"><X size={16} /></button></div></div>)}</div> : <div className="empty-inline"><CheckCircle2 size={18} /> All caught up. No requests waiting.</div>}</section>
+      <div className="parent-grid parent-grid-lower"><section className="panel approval-panel"><div className="section-heading"><div><span className="eyebrow">LOCAL FAMILY DEMO</span><h3>Purchase requests</h3></div><span className="request-count">{data.requests.filter((request) => request.status === "pending" || request.status === "more_info").length} waiting</span></div>{data.requests.length ? <div className="parent-request-list">{[...data.requests].reverse().map((request) => <article className="parent-request" key={request.id}><div className="parent-request-head"><span className="request-emoji">{request.emoji}</span><div><strong>{request.title} · {currency(request.amount)}</strong><small>{request.category} · from {data.childName}</small></div><span className={`request-status status-${request.status}`}>{request.status === "more_info" ? "More info" : request.status[0].toUpperCase() + request.status.slice(1)}</span></div><p><b>Why:</b> {request.reason}</p>{request.status === "pending" || request.status === "more_info" ? <><label className="parent-feedback-label">A note for {data.childName}<textarea value={feedback[request.id] ?? request.feedback} onChange={(event) => onFeedback(request.id, event.target.value)} maxLength={180} placeholder="Ask a kind question or explain your choice…" /></label><div className="parent-request-actions"><button className="button button-lime" onClick={() => onResolve(request.id, "approved")}><Check size={15} /> Approve</button><button className="button button-soft" onClick={() => onResolve(request.id, "more_info")}><CircleHelp size={15} /> Ask for more</button><button className="button button-soft" onClick={() => onResolve(request.id, "rejected")}><X size={15} /> Decline</button></div></> : request.feedback && <p className="request-feedback"><b>Your note:</b> {request.feedback}</p>}</article>)}</div> : <div className="empty-state"><span>🌱</span><strong>No purchase requests yet.</strong><p>Switch to the child view and ask to buy something. This demo stays on this device.</p></div>}</section>
       <section className="panel child-progress-panel"><div className="section-heading"><div><span className="eyebrow">NOTICE THE EFFORT</span><h3>Growing habits</h3></div><Sparkles size={18} /></div><div className="habit-row"><span>🌱</span><div><strong>{data.completedLessons.length} short lessons</strong><small>Financial literacy, at their pace</small></div><b>{data.completedLessons.length}/{lessons.length}</b></div><div className="habit-row"><span>⭐</span><div><strong>{data.xp} experience points</strong><small>Level {Math.floor(data.xp / 150) + 1} · little grower</small></div><button onClick={onGoals} aria-label="See savings goals"><ChevronRight size={18} /></button></div><div className="habit-row"><span>🎯</span><div><strong>{data.goals.length} personal goals</strong><small>A reason to keep practicing</small></div><button onClick={onGoals} aria-label="See savings goals"><ChevronRight size={18} /></button></div></section></div>
     <section className="parent-footer-actions"><div><span className="eyebrow">FAMILY MONEY TOOLS</span><strong>Build a steady little routine.</strong></div><button onClick={onAllowance}><CalendarDays size={16} /> Allowance plan</button><button onClick={onActivity}><ArrowDownLeft size={16} /> Full activity log</button></section>
   </>;
@@ -571,7 +612,7 @@ function SplashScreen({ onStart, onExplore }: { onStart: () => void; onExplore: 
   return <section className="welcome-screen splash-screen"><div className="welcome-logo"><SproutMark /><span>sprout<span className="brand-period">.</span></span></div><div className="splash-content"><span className="splash-confetti splash-confetti-one">✳</span><span className="splash-confetti splash-confetti-two">✦</span><div className="splash-mascot-wrap"><span className="splash-orbit" /><Mascot pose="happy" label="Pip, your Sprout money buddy" /></div><span className="eyebrow">A LITTLE MONEY GARDEN</span><h2>Good money habits<br />start <em>small.</em></h2><p>Save for what matters. Learn as you go. Celebrate every little win.</p><div className="welcome-actions"><button className="button button-lime" onClick={onStart}>Get started <ArrowRight size={16} /></button><button className="hero-link" onClick={onExplore}>Explore the demo</button></div><span className="welcome-disclaimer">For learning and family practice · no real payments</span></div></section>;
 }
 
-function OnboardingScreen({ step, onStep, onNext, onBack, onLogin, onExplore }: { step: number; onStep: (step: number) => void; onNext: () => void; onBack: () => void; onLogin: () => void; onExplore: () => void }) {
+function OnboardingScreen({ step, onStep, onNext, onBack, onLogin, onExplore, showLogin }: { step: number; onStep: (step: number) => void; onNext: () => void; onBack: () => void; onLogin: () => void; onExplore: () => void; showLogin: boolean }) {
   const slides = [
     { eyebrow: "MAKE A WISH, MAKE A PLAN", title: <>Big ideas<br />start small.</>, copy: "Pick a goal you love, then watch each little saving step add up.", pose: "happy" as const, color: "onboarding-orange", note: "Your goals grow with you." },
     { eyebrow: "LEARN BY TRYING", title: <>Money choices<br />made simple.</>, copy: "Short stories and tiny quizzes help every money idea click.", pose: "think" as const, color: "onboarding-green", note: "A new money smarts lesson." },
@@ -582,7 +623,7 @@ function OnboardingScreen({ step, onStep, onNext, onBack, onLogin, onExplore }: 
     <div className="onboarding-top"><button className="brand-button" onClick={onExplore}><SproutMark /><span>sprout<span className="brand-period">.</span></span></button><button className="onboarding-skip" onClick={onExplore}>Skip</button></div>
     <motion.div className="onboarding-main" key={step} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .28 }}>
       <div className="onboarding-art"><div className="onboarding-orbit" /><div className="onboarding-sun">★</div><Mascot pose={slide.pose} label={`Pip: ${slide.note}`} className="onboarding-mascot" /><span className="onboarding-star onboarding-star-a">✦</span><span className="onboarding-star onboarding-star-b">✳</span><span className="onboarding-coin">✦</span><span className="onboarding-art-note">{slide.note}</span></div>
-      <div className="onboarding-copy"><span className="eyebrow">{slide.eyebrow}</span><h2>{slide.title}</h2><p>{slide.copy}</p><div className="onboarding-pagination" aria-label={`Onboarding screen ${step + 1} of 3`}>{slides.map((item, index) => <button key={item.color} className={`pagination-dot${step === index ? " active" : ""}`} onClick={() => onStep(index)} aria-label={`Go to screen ${index + 1}`} aria-current={step === index ? "step" : undefined} />)}</div><div className="onboarding-actions"><button className="button button-dark" onClick={onNext}>{step === 2 ? "Create my family space" : "Next"} <ArrowRight size={17} /></button>{step > 0 && <button className="button button-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>}</div><button className="onboarding-demo-link" onClick={onLogin}>Already have an account? Log in</button></div>
+      <div className="onboarding-copy"><span className="eyebrow">{slide.eyebrow}</span><h2>{slide.title}</h2><p>{slide.copy}</p><div className="onboarding-pagination" aria-label={`Onboarding screen ${step + 1} of 3`}>{slides.map((item, index) => <button key={item.color} className={`pagination-dot${step === index ? " active" : ""}`} onClick={() => onStep(index)} aria-label={`Go to screen ${index + 1}`} aria-current={step === index ? "step" : undefined} />)}</div><div className="onboarding-actions"><button className="button button-dark" onClick={onNext}>{step === 2 ? "Explore the money garden" : "Next"} <ArrowRight size={17} /></button>{step > 0 && <button className="button button-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>}</div>{showLogin && <button className="onboarding-demo-link" onClick={onLogin}>Already have a grown-up account? Log in</button>}</div>
     </motion.div>
   </section>;
 }
@@ -595,9 +636,9 @@ function AuthScreen({ mode, setMode, onSubmit, error, onBack, demoMode }: { mode
   return <section className="auth-screen"><div className="auth-top"><button className="brand-button" onClick={onBack}><SproutMark /><span>sprout<span className="brand-period">.</span></span></button><span className="auth-note"><LockKeyhole size={13} /> Family-first by design</span></div><div className="auth-card"><div className="auth-card-art"><div className="auth-art-circle"><Mascot pose="encourage" label="Pip is ready to help your family" /></div><span>✦</span><small>{demoMode ? "YOUR PRIVATE DEMO GARDEN" : "YOUR FAMILY MONEY SPACE"}</small></div><div className="auth-form-side"><span className="eyebrow">{mode === "signup" ? "A FRESH LITTLE START" : "GOOD TO SEE YOU AGAIN"}</span><h2>{mode === "signup" ? "Let’s grow together." : "Welcome back."}</h2><p>{mode === "signup" ? "Create a space for your family to learn and practice." : "Sign in to pick up where your family left off."}</p><form className="auth-form" onSubmit={onSubmit}><label>Email address<input name="email" type="email" autoComplete="email" placeholder="you@example.com" required /></label><label>Password<input name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="At least 8 characters" minLength={8} required /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button button-dark auth-submit" type="submit">{mode === "signup" ? "Create family space" : "Log in"} <ArrowRight size={16} /></button></form><div className="auth-toggle">{mode === "signup" ? <>Already have an account? <button onClick={() => setMode("login")}>Log in</button></> : <>New to Sprout? <button onClick={() => setMode("signup")}>Create an account</button></>}</div>{demoMode && <div className="auth-demo-notice"><Sparkles size={15} /><span><b>Demo mode is on.</b> This sign-in stays on this device. No payment accounts are connected.</span></div>}</div></div><button className="auth-back" onClick={onBack}><ArrowLeft size={15} /> Back to welcome</button></section>;
 }
 
-function ActionModal({ modal, data, title, amount, emoji, day, setTitle, setAmount, setEmoji, setDay, error, onSubmit, onClose }: {
-  modal: Exclude<ModalState, null>; data: AppData; title: string; amount: string; emoji: string; day: string;
-  setTitle: (value: string) => void; setAmount: (value: string) => void; setEmoji: (value: string) => void; setDay: (value: string) => void;
+function ActionModal({ modal, data, title, amount, weeklySaving, emoji, day, category, reason, setTitle, setAmount, setWeeklySaving, setEmoji, setDay, setCategory, setReason, error, onSubmit, onClose }: {
+  modal: Exclude<ModalState, null>; data: AppData; title: string; amount: string; weeklySaving: string; emoji: string; day: string; category: string; reason: string;
+  setTitle: (value: string) => void; setAmount: (value: string) => void; setWeeklySaving: (value: string) => void; setEmoji: (value: string) => void; setDay: (value: string) => void; setCategory: (value: string) => void; setReason: (value: string) => void;
   error: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onClose: () => void;
 }) {
   const goal = modal.kind === "deposit" ? data.goals.find((item) => item.id === modal.goalId) : null;
@@ -607,14 +648,16 @@ function ActionModal({ modal, data, title, amount, emoji, day, setTitle, setAmou
     allowance: { eyebrow: "MAKE IT A ROUTINE", heading: "Pocket money plan", copy: "Set the practice allowance and the day it usually arrives.", button: "Save the plan", icon: "🗓️" },
     spend: { eyebrow: "PRACTICE, THEN LEARN", heading: "Record a practice purchase", copy: "This changes your demo balance only. No payment will be made.", button: "Add to money log", icon: "🛍️" },
     reward: { eyebrow: "CELEBRATE THE EFFORT", heading: "Give a little reward", copy: "Add a practice reward to the money log. No real money moves.", button: "Give demo reward", icon: "🌟" },
+    purchase: { eyebrow: "LOCAL FAMILY DEMO", heading: "Can I buy this?", copy: "Your request stays on this device for your grown-up to review. No message is sent.", button: "Save my request", icon: "🛍️" },
   };
   const detail = details[modal.kind];
   return <div className="modal-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><motion.section className="action-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" initial={{ opacity: 0, y: 14, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0 }}><button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button><span className="modal-emoji">{detail.icon}</span><span className="eyebrow">{detail.eyebrow}</span><h2 id="modal-title">{detail.heading}</h2><p>{detail.copy}</p><form onSubmit={onSubmit} className="modal-form">
-    {modal.kind === "goal" && <><label>Give your goal a name<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={48} placeholder="A new bike, a book…" required /></label><div className="form-two-col"><label>Target amount<input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={50} max={1000000} step={1} placeholder="2500" inputMode="numeric" required /></label><label>Choose a little icon<select value={emoji} onChange={(event) => setEmoji(event.target.value)}>{["🪴", "🛴", "🚀", "🎨", "🐾", "🎮", "📚", "🌈"].map((item) => <option key={item}>{item}</option>)}</select></label></div></>}
+    {modal.kind === "goal" && <><label>Give your goal a name<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={48} placeholder="A new bike, a book…" required /></label><div className="form-two-col"><label>Target amount<input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={50} max={1000000} step={1} placeholder="2500" inputMode="numeric" required /></label><label>Choose a little icon<select value={emoji} onChange={(event) => setEmoji(event.target.value)}>{["🪴", "🛴", "🚀", "🎨", "🐾", "🎮", "📚", "🌈"].map((item) => <option key={item}>{item}</option>)}</select></label></div><label>Plan to save each week<input value={weeklySaving} onChange={(event) => setWeeklySaving(event.target.value)} type="number" min={1} max={100000} step={1} placeholder="100" inputMode="numeric" required /></label></>}
     {modal.kind === "deposit" && <label>How much would you like to save?<div className="amount-input-wrap"><span>₹</span><input autoFocus value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={1} max={Math.min(data.balance, (goal?.target ?? 0) - (goal?.saved ?? 0))} step={1} placeholder="100" inputMode="numeric" required /></div></label>}
     {modal.kind === "allowance" && <><label>Weekly amount<input autoFocus value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={0} max={100000} step={1} placeholder={String(data.allowance)} inputMode="numeric" required /></label><label>Usually arrives on<select value={day} onChange={(event) => setDay(event.target.value)}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((item) => <option key={item}>{item}</option>)}</select></label></>}
-    {modal.kind === "spend" && <><label>What was the practice purchase?<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={48} placeholder="A snack, a book…" required /></label><label>Amount<input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={1} max={data.balance} step={1} placeholder="100" inputMode="numeric" required /></label></>}
+    {modal.kind === "spend" && <><label>What was the practice purchase?<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={48} placeholder="A snack, a book…" required /></label><div className="form-two-col"><label>Amount<input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={1} max={data.balance} step={1} placeholder="100" inputMode="numeric" required /></label><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{["Treats", "School", "Books", "Games", "Sports", "Other"].map((item) => <option key={item}>{item}</option>)}</select></label></div></>}
     {modal.kind === "reward" && <><label>What are you celebrating?<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={48} placeholder="Finished a chore, helped out…" required /></label><label>Reward amount<input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={1} max={100000} step={1} placeholder="50" inputMode="numeric" required /></label></>}
+    {modal.kind === "purchase" && <><label>What would you like?<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={48} placeholder="A bicycle, headphones…" required /></label><div className="form-two-col"><label>Price<input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min={1} max={100000} step={1} placeholder="350" inputMode="numeric" required /></label><label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{["Treats", "School", "Books", "Games", "Sports", "Other"].map((item) => <option key={item}>{item}</option>)}</select></label></div><label>Why would it be useful or fun?<textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={180} placeholder="Tell your grown-up why you want it…" required /></label></>}
     {error && <p className="form-error" role="alert">{error}</p>}<button className="button button-dark modal-submit" type="submit">{detail.button} <ArrowRight size={15} /></button>
   </form><span className="modal-safe-note"><LockKeyhole size={12} /> A practice change in Sprout’s demo garden</span></motion.section></div>;
 }

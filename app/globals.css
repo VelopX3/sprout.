@@ -1693,3 +1693,70 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.where-money-panel, .child-requests-panel { margin-bottom: 22px; }
+.money-story-copy { margin: -2px 0 20px; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+.money-story-copy strong { color: var(--ink); }
+.category-row strong small { color: var(--ink-soft); font-size: 9px; font-weight: 750; }
+.child-requests-panel .purchase-request-list { margin-top: 5px; }
+.purchase-request-list { display: grid; }
+.purchase-request { display: flex; gap: 13px; padding: 15px 0; border-bottom: 1px solid #e8e9df; }
+.purchase-request:last-child { border-bottom: 0; }
+.purchase-request .request-emoji { flex: 0 0 42px; width: 42px; height: 42px; font-size: 19px; }
+.purchase-request-main { flex: 1; min-width: 0; }
+.purchase-request-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.purchase-request-title strong { color: var(--ink); font-size: 14px; }
+.purchase-request-main > small, .parent-request-head small { display: block; margin-top: 4px; color: var(--ink-soft); font-size: 11px; }
+.purchase-request-main p, .parent-request > p { margin: 8px 0 0; color: var(--ink-soft); font-size: 12px; line-height: 1.55; }
+.request-feedback { padding: 10px 12px; color: var(--ink) !important; background: #fff5ca; border: 1.5px solid var(--ink); border-radius: 12px; }
+.request-status { flex: 0 0 auto; padding: 5px 9px; color: var(--ink); background: #f1eee2; border: 1.5px solid var(--ink); border-radius: 999px; font-size: 10px; font-weight: 850; }
+.status-pending { background: #ffe18a; }
+.status-approved { background: #8fe59b; }
+.status-rejected { background: #ffacb9; }
+.status-more_info { background: #bce7fb; }
+.parent-request-list { display: grid; gap: 11px; }
+.parent-request { padding: 15px; background: #fffefa; border: 1.5px solid var(--ink); border-radius: 16px; }
+.parent-request-head { display: flex; align-items: center; gap: 10px; }
+.parent-request-head > div { flex: 1; min-width: 0; }
+.parent-request-head strong { color: var(--ink); font-size: 13px; }
+.parent-feedback-label, .request-reply label { display: grid; gap: 6px; margin-top: 13px; color: var(--ink); font-size: 11px; font-weight: 800; }
+.parent-feedback-label textarea, .request-reply input, .what-if-controls select, .what-if-controls input { width: 100%; min-height: 42px; padding: 9px 11px; color: var(--ink); background: #fff; border: 1.5px solid var(--ink); border-radius: 11px; font: inherit; font-size: 12px; }
+.parent-feedback-label textarea { min-height: 65px; resize: vertical; }
+.parent-request-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.parent-request-actions .button { min-height: 36px; padding: 8px 11px; font-size: 11px; }
+.request-reply { display: flex; align-items: end; gap: 8px; }
+.request-reply label { flex: 1; }
+.request-reply .button { flex-shrink: 0; min-height: 40px; padding: 8px 12px; }
+.what-if-page .page-intro { align-items: center; }
+.what-if-mascot { width: 130px; height: 130px; flex: 0 0 130px; animation: pip-bob 2.8s ease-in-out infinite; }
+.what-if-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, .8fr); gap: 18px; }
+.what-if-controls { display: grid; align-content: start; gap: 18px; }
+.what-if-controls > label { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 850; }
+.what-if-controls .amount-input-wrap { width: 100%; min-height: 48px; }
+.what-if-controls .amount-input-wrap input { border: 0; box-shadow: none; outline: 0; }
+.what-if-choices { display: flex; flex-wrap: wrap; gap: 9px; }
+.what-if-choices button { padding: 10px 13px; color: var(--ink); background: var(--yellow); border: 1.5px solid var(--ink); border-radius: 999px; box-shadow: 2px 3px 0 var(--ink); font-size: 11px; font-weight: 850; }
+.what-if-result { display: grid; justify-items: start; align-content: start; gap: 7px; padding: 25px; color: var(--ink); background: var(--lime); border: 2px solid var(--ink); border-radius: 21px; box-shadow: 4px 5px 0 var(--ink); }
+.what-if-result .eyebrow { color: var(--ink); }
+.what-if-balance { margin-top: 6px; font-size: clamp(30px, 5vw, 46px); font-weight: 950; letter-spacing: -.055em; }
+.what-if-result > span:nth-of-type(3) { font-size: 12px; }
+.what-if-note { margin: 13px 0; padding: 12px; background: #fffefa; border: 1.5px solid var(--ink); border-radius: 12px; font-size: 12px; font-weight: 800; line-height: 1.5; }
+.what-if-goal { display: grid; grid-template-columns: 1fr auto; gap: 10px; width: 100%; padding: 13px 0; border-top: 1px solid #1114; border-bottom: 1px solid #1114; font-size: 11px; }
+.what-if-goal > span { display: contents; }
+.what-if-result > small { font-size: 10px; }
+.modal-form textarea { width: 100%; min-height: 78px; padding: 12px; color: var(--ink); background: #fff; border: 2px solid var(--ink); border-radius: 12px; font: inherit; font-size: 13px; resize: vertical; }
+.modal-form textarea:focus-visible, .parent-feedback-label textarea:focus-visible, .request-reply input:focus-visible, .what-if-controls input:focus-visible, .what-if-controls select:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+.privacy-note { display: flex; gap: 13px; margin-top: 18px; padding: 15px 17px; color: var(--ink); background: #d9f4e2; border: 2px solid var(--ink); border-radius: 16px; box-shadow: 3px 4px 0 var(--ink); }
+.privacy-note > svg { flex: 0 0 auto; margin-top: 2px; }
+.privacy-note strong { font-size: 13px; }
+.privacy-note p { margin: 5px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
+.reset-demo-button { margin-top: 12px; padding: 9px 13px; color: var(--ink); background: #fffefa; border: 1.5px solid var(--ink); border-radius: 999px; font-size: 11px; font-weight: 850; }
+.goal-time-estimate { display: block; margin-top: 7px; color: var(--ink-soft); font-size: 10px; font-weight: 750; }
+@media (max-width: 720px) {
+  .where-money-panel, .child-requests-panel { margin-bottom: 14px; }
+  .what-if-grid { grid-template-columns: 1fr; }
+  .what-if-mascot { width: 100px; height: 100px; flex-basis: 100px; }
+  .parent-request-head { flex-wrap: wrap; }
+  .parent-request-actions .button { flex: 1 1 auto; }
+  .request-reply { align-items: stretch; flex-direction: column; }
+}

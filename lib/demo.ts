@@ -13,10 +13,21 @@ export type Goal = {
   emoji: string;
   target: number;
   saved: number;
+  weeklySaving: number;
   color: string;
 };
 
-export type Request = { id: string; title: string; amount: number; emoji: string };
+export type Request = {
+  id: string;
+  title: string;
+  amount: number;
+  emoji: string;
+  category: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "more_info";
+  feedback: string;
+  createdAt: string;
+};
 
 export type AppData = {
   childName: string;
@@ -57,14 +68,11 @@ export const initialData: AppData = {
     { id: "t6", title: "Recycling helper", category: "Chore reward", amount: 75, direction: "in", createdAt: date(9, 29, 9) },
   ],
   goals: [
-    { id: "g1", title: "Rainbow scooter", emoji: "🛴", target: 4500, saved: 2850, color: "lilac" },
-    { id: "g2", title: "Space book set", emoji: "🚀", target: 2000, saved: 1320, color: "peach" },
-    { id: "g3", title: "Help the shelter", emoji: "🐾", target: 1000, saved: 500, color: "mint" },
+    { id: "g1", title: "Rainbow scooter", emoji: "🛴", target: 4500, saved: 2850, weeklySaving: 250, color: "lilac" },
+    { id: "g2", title: "Space book set", emoji: "🚀", target: 2000, saved: 1320, weeklySaving: 150, color: "peach" },
+    { id: "g3", title: "Help the shelter", emoji: "🐾", target: 1000, saved: 500, weeklySaving: 100, color: "mint" },
   ],
-  requests: [
-    { id: "r1", title: "Art kit for school", amount: 320, emoji: "🎨" },
-    { id: "r2", title: "A treat with friends", amount: 180, emoji: "🍦" },
-  ],
+  requests: [],
   completedLessons: ["needs-wants"],
   completedChallenges: ["plan-week"],
 };
@@ -119,4 +127,35 @@ export function moveToGoal(data: AppData, goalId: string, amount: number): AppDa
     goals: data.goals.map((item) => item.id === goalId ? { ...item, saved: item.saved + amount } : item),
     transactions: [{ id: crypto.randomUUID(), title: `Added to ${goal.title}`, category: "Savings transfer", amount, direction: "out", createdAt: new Date().toISOString() }, ...data.transactions],
   };
+}
+
+export function requestPurchase(data: AppData, title: string, amount: number, category: string, reason: string): AppData {
+  if (!title.trim() || title.trim().length > 48 || !reason.trim() || reason.trim().length > 180) throw new Error("Add a short item name and reason.");
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100000) throw new Error("Choose a whole amount from ₹1 to ₹1,00,000.");
+  if (!["Treats", "School", "Books", "Games", "Sports", "Other"].includes(category)) throw new Error("Choose a category from the list.");
+  if (data.requests.some((item) => item.status === "pending" || item.status === "more_info")) throw new Error("Finish your open request with a grown-up first.");
+  return { ...data, requests: [{ id: crypto.randomUUID(), title: title.trim(), amount, emoji: "🛍️", category, reason: reason.trim(), status: "pending", feedback: "", createdAt: new Date().toISOString() }, ...data.requests] };
+}
+
+export function decideRequest(data: AppData, requestId: string, status: "approved" | "rejected" | "more_info", feedback: string): AppData {
+  const request = data.requests.find((item) => item.id === requestId);
+  if (!request || (request.status !== "pending" && request.status !== "more_info")) throw new Error("This request is no longer waiting for a decision.");
+  if (!feedback.trim() || feedback.trim().length > 180) throw new Error("Add a kind note of up to 180 characters to explain your decision.");
+  if (status === "approved" && request.amount > data.balance) throw new Error("There isn’t enough pocket money to approve this yet.");
+  const next = status === "approved" ? debit(data, request.amount, request.title, request.category) : data;
+  return { ...next, requests: next.requests.map((item) => item.id === requestId ? { ...item, status, feedback: feedback.trim() } : item) };
+}
+
+export function replyToRequest(data: AppData, requestId: string, reason: string): AppData {
+  const request = data.requests.find((item) => item.id === requestId);
+  if (!request || request.status !== "more_info") throw new Error("There isn’t a question waiting for you.");
+  if (!reason.trim() || reason.trim().length > 180) throw new Error("Add a short reply (up to 180 characters).");
+  return { ...data, requests: data.requests.map((item) => item.id === requestId ? { ...item, reason: reason.trim(), status: "pending" } : item) };
+}
+
+export function simulatePurchase(balance: number, goal: Goal | undefined, amount: number) {
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error("Choose a whole amount of zero or more.");
+  const spendable = Math.min(balance, amount);
+  const goalGap = goal ? Math.max(0, goal.target - goal.saved) : 0;
+  return { remainingBalance: balance - spendable, shortfall: amount - spendable, goalGap, goalGapAfter: goalGap + spendable };
 }
